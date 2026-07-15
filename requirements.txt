@@ -1,0 +1,7 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+httpx>=0.27
+cryptography>=42.0
+# local-ai-core は requirements.txt からではなく、Dockerfile内で
+# `pip install /local_ai_core` として明示的にインストールする
+# (docker-composeのbuild contextをリポジトリ全体に広げているため)。
