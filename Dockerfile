@@ -4,8 +4,12 @@
 #   build:
 #     context: ..                              # umbrella repoのルート
 #     dockerfile: life-support-os-gateway/Dockerfile
-# として呼ばれる想定(local_ai_coreをこのイメージにも同梱するため、
+# として呼ばれる想定(local-ai-coreをこのイメージにも同梱するため、
 # gatewayフォルダ単体ではなくリポジトリ全体をbuild contextにする)。
+#
+# 注意: フォルダ名は "local-ai-core"(ハイフン)。Pythonパッケージ名としての
+# "local_ai_core"(アンダースコア)と紛らわしいので、COPY元のパスを
+# 間違えないこと(実際にこのDockerfileの初版でこの点を取り違えていた)。
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -13,9 +17,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# 1. local_ai_core を先にインストール(umbrella repoルート直下にある想定)
-COPY local_ai_core /local_ai_core
-RUN pip install --no-cache-dir /local_ai_core
+# 1. local-ai-core を先にインストール(umbrella repoルート直下にある想定)
+COPY local-ai-core /local-ai-core
+RUN pip install --no-cache-dir /local-ai-core
 
 # 2. gateway本体
 COPY life-support-os-gateway/requirements.txt .
@@ -23,7 +27,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY life-support-os-gateway/ .
 
 RUN mkdir -p /app/data
-RUN useradd -m appuser && chown -R appuser /app
+# 共有ボリューム(/shared/core)用のディレクトリも、chownより前にここで
+# 作っておく。先に作らないと、docker-composeがボリュームをマウントした時に
+# root所有のままになり、非rootユーザー(appuser)で書き込めなくなって
+# sqlite3.OperationalError: unable to open database file になる
+# (このDockerfileの初版でこの点を見落としていた)。
+RUN mkdir -p /shared/core
+RUN useradd -m appuser && chown -R appuser /app /shared/core
 USER appuser
 
 ENV PYTHONUNBUFFERED=1 \

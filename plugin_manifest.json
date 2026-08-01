@@ -12,6 +12,14 @@
       "purpose": "生活リズムの情報を踏まえた横断的な提案・回答を行うため"
     },
     {
+      "scope": "memory:read:finance.*",
+      "purpose": "支出・サブスク・資産分析の情報を踏まえた横断的な提案・回答を行うため"
+    },
+    {
+      "scope": "memory:read:study.*",
+      "purpose": "学習の苦手分野を踏まえた横断的な提案・回答を行うため"
+    },
+    {
       "scope": "schedule_items:read",
       "purpose": "全アプリの予定・締切をまとめて確認し、今日やるべきことを提案するため"
     },
