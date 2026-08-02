@@ -84,6 +84,37 @@ POSTすると`HttpOnly`Cookieが発行され、以降のリクエストはこの
 センター・横断検索・オートメーション・アシスタント)は統合コンソール(`/`)側に
 すでに実装されているため、各アプリが個別に作り直す必要はない。
 
+## バックアップと復元
+
+`automation_scheduler.py`と同じAPSchedulerパターンで、`core.db`を24時間ごとに
+自動バックアップする(`/backups`にオンラインバックアップAPI経由で保存)。
+
+復元は3通りの方法がある(いずれも`backup.restore_core_db()`を呼ぶだけで、
+実装は1箇所):
+
+1. 管理API: `POST /admin/restore` に `{"confirm": true}` を送る
+   (`backup_path`省略時は最新バックアップを使う)
+2. CLI: `python restore_cli.py restore --db-path /shared/core/core.db --latest`
+   (gatewayプロセス自体が起動できない障害時でも使える)
+3. `list_backups()` / `restore_core_db()` を直接呼ぶ(テスト参照)
+
+復元前の状態は必ず `<db_path>.before_restore-<timestamp>` として自動退避される。
+実際に「取って→壊して→戻して→データが一致すること」を確認する復元リハーサルは
+`tests/test_backup.py::test_restore_rehearsal_full_cycle` として自動テスト化して
+あり、CIで毎回実行される。
+
+## テスト
+
+```bash
+pip install -r requirements-dev.txt --break-system-packages
+GATEWAY_AUTH_TOKEN=dummy-token-for-tests pytest tests/ -v
+```
+
+- `test_auth.py`: 認証ミドルウェアが「唯一の入口」として機能していることの回帰テスト
+- `test_backup.py`: バックアップ/復元(リハーサル含む)
+- `test_proxy.py`: `_proxy()`がCookieを転送すること(health-support等の
+  service_auth.pyがこれに依存している)、hop-by-hopヘッダーを除外すること
+
 ## 制約(現時点)
 
 - リバースプロキシはREST(JSON)のみを想定しており、WebSocket/SSEには対応していない。

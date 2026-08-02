@@ -46,6 +46,7 @@ import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -61,7 +62,7 @@ from local_ai_core.llm import LLMRouter, OllamaProvider, ClaudeProvider, OpenAIP
 
 from automation_scheduler import build_automation_scheduler
 from auth import auth_middleware, get_auth_token, SESSION_COOKIE_NAME
-from backup import backup_core_db
+from backup import backup_core_db, restore_core_db, list_backups
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("life_support_os_gateway")
@@ -224,6 +225,50 @@ async def trigger_backup():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"バックアップに失敗しました: {e}")
     return {"ok": True, "path": dest_path}
+
+
+@app.get("/admin/backups")
+def list_available_backups():
+    """既存バックアップの一覧(新しい順)。復元前にどれを使うか選ぶためのAPI。"""
+    return {"backups": list_backups(BACKUP_DIR)}
+
+
+class RestoreRequest(BaseModel):
+    # 明示的にファイルを指定する場合。省略時は最新バックアップを使う。
+    backup_path: Optional[str] = None
+    # 誤操作防止のため、本文に "confirm": true を必須にする
+    # (エンドポイントが存在するだけでうっかり叩けてしまわないように)。
+    confirm: bool = False
+
+
+@app.post("/admin/restore")
+async def trigger_restore(body: RestoreRequest):
+    """core.dbをバックアップから復元する。破壊的な操作のため:
+    - 認証済みであること(auth_middlewareが/adminパスを保護している)
+    - リクエストボディで confirm=true を明示すること
+    が両方必要。復元前の状態は backup.restore_core_db が自動的に
+    <db_path>.before_restore-<timestamp> として退避する。
+    """
+    if not body.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="復元は破壊的な操作です。confirm: true を指定して呼び出してください。",
+        )
+
+    backup_path = body.backup_path
+    if not backup_path:
+        backups = list_backups(BACKUP_DIR)
+        if not backups:
+            raise HTTPException(status_code=404, detail="復元可能なバックアップが見つかりません")
+        backup_path = backups[0]
+
+    try:
+        restored_path = await asyncio.to_thread(restore_core_db, backup_path, get_core_db_path())
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"復元に失敗しました: {e}")
+    return {"ok": True, "restored_from": backup_path, "path": restored_path}
 
 
 @app.get("/me/profile_id")
