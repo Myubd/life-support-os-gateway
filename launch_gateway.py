@@ -294,11 +294,16 @@ def main() -> None:
         # フロントエンドのビルド済みdistが同梱されていれば、gatewayから
         # 直接配信する(将来的にexe同梱する想定。ソース実行時は無いので
         # gateway側は単に静的マウントをスキップする)。
+        # - archlife-frontend: `npm run build:electron` でビルドしたもの
+        #   (VITE_API_BASE_URL=http://localhost:8080 を焼き込み済み。
+        #   gatewayの/api/lifeプロキシは経由せず、archlife_backendへ直接アクセスする)
+        # - interview_app: `npm run build:gateway` でビルドしたもの
+        #   (VITE_API_BASE=http://localhost:8000/api/v1 を焼き込み済み。同上の理由)
         frontend_dists = {
             "ARCHLIFE_FRONTEND_DIST": os.path.normpath(
                 os.path.join(launcher_dir, "../archlife/archlife-frontend/dist")),
             "INTERVIEW_FRONTEND_DIST": os.path.normpath(
-                os.path.join(launcher_dir, "../interview_app/react-fastapi/frontend/dist")),
+                os.path.join(launcher_dir, "../interview_app/react-fastapi/frontend/dist-gateway")),
         }
         gateway_env = build_gateway_env(base_env, auth_token, frontend_dists)
         manager.start("gateway", uvicorn_args(GATEWAY_PORT), cwd=launcher_dir, env=gateway_env)
