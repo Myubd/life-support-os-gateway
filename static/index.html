@@ -703,6 +703,25 @@ async function startApp() {
 }
 
 async function boot() {
+  // launch_gateway.py(単体exe版ランチャー)は、初回自動生成したトークンを
+  // ユーザーに入力させる代わりに `?token=...` を付けてブラウザを開く。
+  // ここでそれを拾って自動ログインし、アドレスバーからは即座に消す
+  // (トークンが履歴やURL欄に残り続けないようにするため)。
+  const params = new URLSearchParams(location.search);
+  const autoToken = params.get("token");
+  if (autoToken) {
+    history.replaceState(null, "", location.pathname);  // 先にURLから消す
+    try {
+      await fetch("/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: autoToken }),
+      });
+      // 失敗した場合も、この後の /me/profile_id チェックで
+      // 通常のログイン画面にフォールバックするので、ここでは無視してよい。
+    } catch (e) { /* 通信失敗時も下のフォールバックに任せる */ }
+  }
+
   // /me/profile_id は認証必須のエンドポイントなので、ログイン確認を兼ねる。
   const res = await fetch("/me/profile_id");
   if (res.status === 401) {

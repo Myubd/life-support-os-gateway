@@ -312,7 +312,12 @@ def main() -> None:
             lk.log("gatewayの起動がタイムアウトしました", "ERROR")
         else:
             lk.log(f"✓ gateway が起動しました ({GATEWAY_URL})", "SUCCESS")
-            lk.open_browser(GATEWAY_URL, GATEWAY_PORT, timeout=5.0)
+            # 初回自動生成したトークンをユーザーに手入力させないよう、
+            # ?token=... を付けて開く(gateway側のboot()がこれを拾って
+            # 自動ログインし、URLからはすぐに消す)。
+            import urllib.parse
+            login_url = f"{GATEWAY_URL}/?token={urllib.parse.quote(auth_token)}"
+            lk.open_browser(login_url, GATEWAY_PORT, timeout=5.0)
 
         lk.log("=" * 60, "INFO")
         lk.log("すべてのサービスが起動しました。終了するにはこのウィンドウを閉じてください。", "SUCCESS")
