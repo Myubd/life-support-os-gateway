@@ -43,7 +43,7 @@ SESSION_COOKIE_NAME = "gw_session"
 # 本体(HTML/JS/CSS)を配信するだけのマウントであり、実データは
 # それぞれのバックエンドAPI呼び出し(/api/life/* /api/career/*)側で
 # 別途認証がかかるため、ここでは除外してよい。
-_PUBLIC_PATHS = {"/", "/health", "/auth/login", "/auth/logout"}
+_PUBLIC_PATHS = {"/", "/health", "/auth/login", "/auth/logout", "/core/frontend_mounts"}
 _PUBLIC_PREFIXES = ("/life", "/career")
 
 

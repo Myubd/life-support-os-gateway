@@ -9,6 +9,7 @@ launch_gateway.py の回帰テスト。
 import json
 import os
 import signal
+import sys
 
 import pytest
 
@@ -232,3 +233,72 @@ def test_backend_services_have_unique_ports():
 def test_backend_services_have_unique_names():
     names = [spec.name for spec in lg.BACKEND_SERVICES]
     assert len(names) == len(set(names))
+
+
+# ── frozen(exe化後)モードの起動コマンド・環境変数解決 ─────────────
+
+def test_backend_services_all_have_frozen_exe_path():
+    for spec in lg.BACKEND_SERVICES:
+        assert spec.frozen_exe_relative_path, f"{spec.name} に frozen_exe_relative_path が無い"
+        assert spec.frozen_exe_relative_path.startswith("backends/")
+
+
+def test_resolve_service_command_dev_mode_uses_uvicorn():
+    spec = lg.BACKEND_SERVICES[0]
+    args, cwd = lg.resolve_service_command(spec, launcher_dir="/app/gateway", frozen=False)
+
+    assert "uvicorn" in args
+    assert cwd == os.path.normpath(os.path.join("/app/gateway", spec.dev_relative_dir))
+
+
+def test_resolve_service_command_frozen_mode_uses_exe_directly():
+    spec = lg.BACKEND_SERVICES[0]
+    args, cwd = lg.resolve_service_command(spec, launcher_dir="C:/LifeSupportOS", frozen=True)
+
+    assert len(args) == 1
+    assert args[0].endswith(spec.frozen_exe_relative_path.replace("/", os.sep))
+    # cwdは実行ファイル自身のディレクトリ(相対import等が期待する場所)
+    assert cwd == os.path.dirname(args[0])
+
+
+def test_build_frozen_service_env_sets_port_and_data_dir(tmp_path):
+    env = lg.build_frozen_service_env(base_env={"PATH": "/usr/bin"}, auth_token="tok", port=8080, data_dir=tmp_path)
+
+    assert env["GATEWAY_AUTH_TOKEN"] == "tok"
+    assert env["PORT"] == "8080"
+    assert env["DATA_DIR"] == str(tmp_path)
+    assert env["PATH"] == "/usr/bin"
+
+
+def test_build_frozen_service_env_does_not_mutate_base_env(tmp_path):
+    base_env = {"PATH": "/usr/bin"}
+    lg.build_frozen_service_env(base_env=base_env, auth_token="tok", port=8080, data_dir=tmp_path)
+    assert base_env == {"PATH": "/usr/bin"}
+
+
+def test_is_frozen_false_in_normal_python(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert lg.is_frozen() is False
+
+
+def test_is_frozen_true_when_sys_frozen_set(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert lg.is_frozen() is True
+
+
+def test_resolve_frontend_dists_frozen_uses_internal_subfolder():
+    # PyInstaller 6.xのonedirビルドではdatasが"_internal/"配下に置かれる
+    # (実際にビルドしたexeで確認した実挙動。ここで固定しておく)。
+    dists = lg.resolve_frontend_dists("C:/LifeSupportOS", frozen=True)
+
+    assert dists["ARCHLIFE_FRONTEND_DIST"] == os.path.join("C:/LifeSupportOS", "_internal", "frontend_dist_archlife")
+    assert dists["INTERVIEW_FRONTEND_DIST"] == os.path.join("C:/LifeSupportOS", "_internal", "frontend_dist_interview")
+
+
+def test_resolve_frontend_dists_dev_mode_uses_sibling_repos():
+    dists = lg.resolve_frontend_dists("/app/gateway", frozen=False)
+
+    assert dists["ARCHLIFE_FRONTEND_DIST"].endswith(
+        os.path.normpath("archlife/archlife-frontend/dist"))
+    assert dists["INTERVIEW_FRONTEND_DIST"].endswith(
+        os.path.normpath("interview_app/react-fastapi/frontend/dist-gateway"))

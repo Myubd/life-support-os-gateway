@@ -64,8 +64,22 @@ class ServiceSpec:
     dev_relative_dir: str
     # このサービス固有の環境変数(db pathなど)。値は build_service_env() で解決する。
     extra_env: dict = field(default_factory=dict)
+    # exe化後(frozen)の実行ファイルの場所。LifeSupportOS.exe自身の
+    # ディレクトリからの相対パス。インストーラーが作る配置レイアウト
+    # (下記コメント参照)に対応させている。
+    frozen_exe_relative_path: str = ""
 
 
+# exe配布時の想定レイアウト(Inno Setupインストーラーがこの形に配置する):
+#
+#   <インストール先>\
+#   ├── LifeSupportOS.exe          (gateway。これがlaunch_gateway.py本体)
+#   └── backends\
+#       ├── archlife_backend\launch_fastapi.exe
+#       ├── interview_backend\interview_backend.exe
+#       ├── study_support\study_support.exe
+#       └── health_support\health_support.exe
+#
 # 5プロセス中、gateway以外の4つ。gateway自身は別扱い(フロントエンド配信の
 # env varsも必要なため main() 内で個別に組み立てる)。
 BACKEND_SERVICES: list[ServiceSpec] = [
@@ -74,24 +88,31 @@ BACKEND_SERVICES: list[ServiceSpec] = [
         port=8080,
         dev_relative_dir="../archlife/archlife-fastapi",
         extra_env={"ARCHLIFE_DB_PATH": "archlife.db", "OLLAMA_URL": OLLAMA_HOST},
+        # archlife-fastapiの実行ファイル名は launch_fastapi.spec の
+        # name='launch_fastapi' に由来する(Electron配布と共用のため、
+        # このリポジトリ側のexe名までは変えていない)。
+        frozen_exe_relative_path="backends/archlife_backend/launch_fastapi.exe",
     ),
     ServiceSpec(
         name="interview_backend",
         port=8000,
         dev_relative_dir="../interview_app/react-fastapi/backend",
         extra_env={"INTERVIEW_DB_PATH": "career_support.db", "OLLAMA_HOST": OLLAMA_HOST},
+        frozen_exe_relative_path="backends/interview_backend/interview_backend.exe",
     ),
     ServiceSpec(
         name="study_support",
         port=8100,
         dev_relative_dir="../study-support",
         extra_env={"STUDY_DB_PATH": "study.db"},
+        frozen_exe_relative_path="backends/study_support/study_support.exe",
     ),
     ServiceSpec(
         name="health_support",
         port=8200,
         dev_relative_dir="../health-support",
         extra_env={"HEALTH_DB_PATH": "health.db"},
+        frozen_exe_relative_path="backends/health_support/health_support.exe",
     ),
 ]
 
@@ -185,6 +206,43 @@ def build_gateway_env(base_env: dict, auth_token: str, frontend_dists: dict[str,
     return env
 
 
+def is_frozen() -> bool:
+    """PyInstallerでexe化された状態で実行されているか。"""
+    return bool(getattr(sys, "frozen", False))
+
+
+def build_frozen_service_env(base_env: dict, auth_token: str, port: int, data_dir: Path) -> dict:
+    """exe化後(frozen)のバックエンド起動用環境変数。
+
+    各バックエンドの run_service.py / launch_fastapi.py は、
+    build_service_env() が使う個別の "*_DB_PATH" 環境変数ではなく、
+    より単純な PORT / DATA_DIR の2つだけを見る契約になっている
+    (archlife-fastapi/launch_fastapi.py と同じ契約に統一してある)。
+    DBファイル名の組み立てはバックエンド自身の役目にすることで、
+    ここではポートとデータの置き場所だけを渡せばよいようにしている。
+    """
+    env = dict(base_env)
+    env["GATEWAY_AUTH_TOKEN"] = auth_token
+    env["PORT"] = str(port)
+    env["DATA_DIR"] = str(data_dir)
+    return env
+
+
+def resolve_service_command(spec: ServiceSpec, launcher_dir: str, frozen: bool) -> tuple[list[str], str]:
+    """1サービス分の起動コマンドと作業ディレクトリを解決する。
+
+    - ソース実行時: `python -m uvicorn main:app --port <port>` を
+      spec.dev_relative_dir で実行する(従来通り)。
+    - exe化後: spec.frozen_exe_relative_path が指す実行ファイルを
+      そのまま起動する(引数無し。設定は環境変数で渡す)。
+    """
+    if frozen:
+        exe_path = os.path.normpath(os.path.join(launcher_dir, spec.frozen_exe_relative_path))
+        return [exe_path], os.path.dirname(exe_path)
+    cwd = os.path.normpath(os.path.join(launcher_dir, spec.dev_relative_dir))
+    return uvicorn_args(spec.port), cwd
+
+
 # ============================================================
 # プロセス管理
 # ============================================================
@@ -247,6 +305,31 @@ def uvicorn_args(port: int) -> list[str]:
 # メイン
 # ============================================================
 
+def resolve_frontend_dists(launcher_dir: str, frozen: bool) -> dict[str, str]:
+    """フロントエンドのビルド済みdistの場所を解決する。
+
+    - ソース実行時: 各リポジトリの npm run build 出力をそのまま参照する
+      (archlife-frontend: `npm run build:electron`、
+       interview_app: `npm run build:gateway`)
+    - exe化後: LifeSupportOS.exeのビルド時にdatasとして同梱した
+      frontend_dist_archlife / frontend_dist_interview を参照する。
+      PyInstaller 6.xのonedirビルドでは、datasは実行ファイルと同じ階層
+      ではなく "_internal/" 配下に置かれる(実際にビルドしたexeで確認して
+      初めて気づいた挙動なので、ここにコメントを残しておく)。
+    """
+    if frozen:
+        return {
+            "ARCHLIFE_FRONTEND_DIST": os.path.join(launcher_dir, "_internal", "frontend_dist_archlife"),
+            "INTERVIEW_FRONTEND_DIST": os.path.join(launcher_dir, "_internal", "frontend_dist_interview"),
+        }
+    return {
+        "ARCHLIFE_FRONTEND_DIST": os.path.normpath(
+            os.path.join(launcher_dir, "../archlife/archlife-frontend/dist")),
+        "INTERVIEW_FRONTEND_DIST": os.path.normpath(
+            os.path.join(launcher_dir, "../interview_app/react-fastapi/frontend/dist-gateway")),
+    }
+
+
 def main() -> None:
     lk.hide_console_window()
     lk.fix_stdio()
@@ -267,20 +350,40 @@ def main() -> None:
     for spec in BACKEND_SERVICES:
         lk.kill_existing_process(spec.port)
 
-    ollama_ok = lk.ensure_ollama(REQUIRED_MODELS)
+    ollama_ok = True
+    if os.environ.get("LIFEOS_SKIP_OLLAMA_SETUP") == "1":
+        # テスト/CI用の抜け道。実際のOllamaインストール・モデルダウンロードは
+        # 重く、かつWindows専用のインストーラーを実行するためLinux CI等では
+        # そもそも動かない。オーケストレーション(5プロセスの起動・認証・
+        # フロントエンド配信)だけを検証したい場合に使う。
+        lk.log("LIFEOS_SKIP_OLLAMA_SETUP=1 のため、Ollamaのセットアップをスキップします", "WARNING")
+    else:
+        ollama_ok = lk.ensure_ollama(REQUIRED_MODELS)
     if not ollama_ok:
         lk.log("Ollamaのセットアップが完了しませんでした。バックエンドは起動しますが、"
                "AI機能が使えない可能性があります。", "WARNING")
 
     manager = ProcessManager()
     base_env = dict(os.environ)
-    launcher_dir = os.path.dirname(os.path.abspath(__file__))
+    frozen = is_frozen()
+    # exe化後は sys.executable がインストール先の LifeSupportOS.exe を指すため、
+    # そのディレクトリを起点に backends/ 配下の各exeを解決する。
+    # ソース実行時は従来通りこのファイル自身のディレクトリが起点。
+    launcher_dir = os.path.dirname(os.path.abspath(sys.executable if frozen else __file__))
+    lk.log(f"起動モード: {'exe (frozen)' if frozen else 'ソース実行 (python)'}", "INFO")
 
     try:
         for spec in BACKEND_SERVICES:
-            env = build_service_env(spec, base_env, auth_token, data_dir)
-            cwd = os.path.normpath(os.path.join(launcher_dir, spec.dev_relative_dir))
-            manager.start(spec.name, uvicorn_args(spec.port), cwd=cwd, env=env)
+            args, cwd = resolve_service_command(spec, launcher_dir, frozen)
+            if frozen:
+                # 各バックエンド固有のDB保存先を分けるため、サービス名ごとの
+                # サブフォルダにする(全部同じdata_dir直下だとファイル名が
+                # 衝突する可能性があるため)。
+                service_data_dir = data_dir / spec.name
+                env = build_frozen_service_env(base_env, auth_token, spec.port, service_data_dir)
+            else:
+                env = build_service_env(spec, base_env, auth_token, data_dir)
+            manager.start(spec.name, args, cwd=cwd, env=env)
 
         # 各バックエンドがポートを開くまで待つ(gatewayがプロキシ先に
         # すぐアクセスできるようにするため。失敗してもgateway自体は
@@ -291,46 +394,93 @@ def main() -> None:
             else:
                 lk.log(f"✓ {spec.name} が起動しました (port {spec.port})", "SUCCESS")
 
-        # フロントエンドのビルド済みdistが同梱されていれば、gatewayから
-        # 直接配信する(将来的にexe同梱する想定。ソース実行時は無いので
-        # gateway側は単に静的マウントをスキップする)。
-        # - archlife-frontend: `npm run build:electron` でビルドしたもの
-        #   (VITE_API_BASE_URL=http://localhost:8080 を焼き込み済み。
-        #   gatewayの/api/lifeプロキシは経由せず、archlife_backendへ直接アクセスする)
-        # - interview_app: `npm run build:gateway` でビルドしたもの
-        #   (VITE_API_BASE=http://localhost:8000/api/v1 を焼き込み済み。同上の理由)
-        frontend_dists = {
-            "ARCHLIFE_FRONTEND_DIST": os.path.normpath(
-                os.path.join(launcher_dir, "../archlife/archlife-frontend/dist")),
-            "INTERVIEW_FRONTEND_DIST": os.path.normpath(
-                os.path.join(launcher_dir, "../interview_app/react-fastapi/frontend/dist-gateway")),
-        }
-        gateway_env = build_gateway_env(base_env, auth_token, frontend_dists)
-        manager.start("gateway", uvicorn_args(GATEWAY_PORT), cwd=launcher_dir, env=gateway_env)
-
-        if not lk.wait_for_port(GATEWAY_PORT, timeout=30.0):
-            lk.log("gatewayの起動がタイムアウトしました", "ERROR")
+        # フロントエンドのビルド済みdistの場所は、ソース実行時とexe化後で異なる
+        # (resolve_frontend_dists()参照)。
+        frontend_dists = resolve_frontend_dists(launcher_dir, frozen)
+        if frozen:
+            gateway_args = [sys.executable]
+            gateway_cwd = launcher_dir
         else:
-            lk.log(f"✓ gateway が起動しました ({GATEWAY_URL})", "SUCCESS")
-            # 初回自動生成したトークンをユーザーに手入力させないよう、
-            # ?token=... を付けて開く(gateway側のboot()がこれを拾って
-            # 自動ログインし、URLからはすぐに消す)。
-            import urllib.parse
-            login_url = f"{GATEWAY_URL}/?token={urllib.parse.quote(auth_token)}"
-            lk.open_browser(login_url, GATEWAY_PORT, timeout=5.0)
+            gateway_args = uvicorn_args(GATEWAY_PORT)
+            gateway_cwd = launcher_dir
 
-        lk.log("=" * 60, "INFO")
-        lk.log("すべてのサービスが起動しました。終了するにはこのウィンドウを閉じてください。", "SUCCESS")
-        lk.log("=" * 60, "INFO")
+        gateway_env = build_gateway_env(base_env, auth_token, frontend_dists)
 
-        # gatewayプロセスが生きている間は待ち続ける
-        gateway_proc = manager.processes[-1][1]
-        gateway_proc.wait()
+        if frozen:
+            # exe化後、gateway自身(main:app)はこのプロセス自身の中で
+            # 直接起動する(別exeを子プロセスとして再度立ち上げる必要はない。
+            # LifeSupportOS.exe自体がgatewayのuvicornを内包しているため)。
+            # そのため gateway だけは ProcessManager に登録せず、この後で
+            # 直接 uvicorn.run() を呼ぶ。
+            pass
+        else:
+            manager.start("gateway", gateway_args, cwd=gateway_cwd, env=gateway_env)
+
+        if frozen:
+            # 環境変数はこのプロセス自身にも反映してから、同一プロセス内で
+            # gatewayのASGIアプリを起動する。
+            os.environ.update(gateway_env)
+            _run_gateway_in_process()
+        else:
+            if not lk.wait_for_port(GATEWAY_PORT, timeout=30.0):
+                lk.log("gatewayの起動がタイムアウトしました", "ERROR")
+            else:
+                lk.log(f"✓ gateway が起動しました ({GATEWAY_URL})", "SUCCESS")
+                _open_browser_with_token(auth_token)
+
+            lk.log("=" * 60, "INFO")
+            lk.log("すべてのサービスが起動しました。終了するにはこのウィンドウを閉じてください。", "SUCCESS")
+            lk.log("=" * 60, "INFO")
+
+            # gatewayプロセスが生きている間は待ち続ける
+            gateway_proc = manager.processes[-1][1]
+            gateway_proc.wait()
 
     except KeyboardInterrupt:
         lk.log("終了処理を開始します...", "INFO")
     finally:
         manager.terminate_all()
+
+
+def _open_browser_with_token(auth_token: str) -> None:
+    # 初回自動生成したトークンをユーザーに手入力させないよう、
+    # ?token=... を付けて開く(gateway側のboot()がこれを拾って
+    # 自動ログインし、URLからはすぐに消す)。
+    import urllib.parse
+    login_url = f"{GATEWAY_URL}/?token={urllib.parse.quote(auth_token)}"
+    lk.open_browser(login_url, GATEWAY_PORT, timeout=5.0)
+
+
+def _run_gateway_in_process() -> None:
+    """exe化後、gateway(main:app)を子プロセスではなく自プロセス内で起動する。
+
+    理由: LifeSupportOS.exe自体がgatewayのビルド成果物なので、わざわざ
+    自分自身をもう一度子プロセスとして起動する必要が無い(むしろ
+    sys.executableを再帰的にspawnすると多重起動になってしまう)。
+    バックエンド4つだけは別exe(backends/配下)なので引き続き子プロセスで
+    起動する。
+    """
+    import threading
+    import uvicorn
+
+    def _run():
+        uvicorn.run("main:app", host="127.0.0.1", port=GATEWAY_PORT, log_level="warning", loop="asyncio")
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    if not lk.wait_for_port(GATEWAY_PORT, timeout=30.0):
+        lk.log("gatewayの起動がタイムアウトしました", "ERROR")
+    else:
+        lk.log(f"✓ gateway が起動しました ({GATEWAY_URL})", "SUCCESS")
+        auth_token = os.environ.get("GATEWAY_AUTH_TOKEN", "")
+        _open_browser_with_token(auth_token)
+
+    lk.log("=" * 60, "INFO")
+    lk.log("すべてのサービスが起動しました。終了するにはこのウィンドウを閉じてください。", "SUCCESS")
+    lk.log("=" * 60, "INFO")
+
+    thread.join()
 
 
 if __name__ == "__main__":

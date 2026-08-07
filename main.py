@@ -360,13 +360,27 @@ async def proxy_health_support(request: Request, full_path: str):
 _ARCHLIFE_FRONTEND_DIST = os.environ.get("ARCHLIFE_FRONTEND_DIST")
 _INTERVIEW_FRONTEND_DIST = os.environ.get("INTERVIEW_FRONTEND_DIST")
 
-if _ARCHLIFE_FRONTEND_DIST and os.path.isdir(_ARCHLIFE_FRONTEND_DIST):
+_life_frontend_mounted = bool(_ARCHLIFE_FRONTEND_DIST and os.path.isdir(_ARCHLIFE_FRONTEND_DIST))
+_career_frontend_mounted = bool(_INTERVIEW_FRONTEND_DIST and os.path.isdir(_INTERVIEW_FRONTEND_DIST))
+
+if _life_frontend_mounted:
     app.mount("/life", StaticFiles(directory=_ARCHLIFE_FRONTEND_DIST, html=True), name="life-frontend")
     logger.info("mounted Archlife frontend from %s at /life", _ARCHLIFE_FRONTEND_DIST)
 
-if _INTERVIEW_FRONTEND_DIST and os.path.isdir(_INTERVIEW_FRONTEND_DIST):
+if _career_frontend_mounted:
     app.mount("/career", StaticFiles(directory=_INTERVIEW_FRONTEND_DIST, html=True), name="career-frontend")
     logger.info("mounted interview_app frontend from %s at /career", _INTERVIEW_FRONTEND_DIST)
+
+
+@app.get("/core/frontend_mounts")
+def get_frontend_mounts():
+    """統合コンソールのナビゲーションリンクが、Docker Compose版
+    (各フロントエンドが別コンテナ・別ポートで動く)とexe版
+    (gatewayが/life・/careerで直接配信する)のどちらを指すべきかを
+    フロントエンドJSが判定するための情報。認証不要(単なる設定フラグで、
+    機密情報を含まないため"/"と同じ扱いにする)。
+    """
+    return {"life": _life_frontend_mounted, "career": _career_frontend_mounted}
 
 
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")

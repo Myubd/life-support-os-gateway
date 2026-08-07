@@ -35,7 +35,7 @@ def test_get_auth_token_returns_value_when_set(monkeypatch):
 
 @pytest.mark.parametrize(
     "path",
-    ["/", "/health", "/auth/login", "/auth/logout", "/life/", "/career/anything"],
+    ["/", "/health", "/auth/login", "/auth/logout", "/life/", "/career/anything", "/core/frontend_mounts"],
 )
 def test_public_paths_are_public(path):
     assert auth._is_public(path) is True

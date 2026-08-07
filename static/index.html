@@ -223,16 +223,13 @@
 
   <nav class="apps">
     <!--
-      注意: /life/ /career/ は、将来「1つのexeでgateway自身が両フロントエンドの
-      静的ファイルまで配信する」構成(ARCHLIFE_FRONTEND_DIST/INTERVIEW_FRONTEND_DIST
-      環境変数を設定した場合)向けのリンクだった。今のDocker Compose構成では
-      archlife_frontend/interview_frontendがそれぞれ別コンテナ・別ポートで
-      動いているため、直接そちらのポートを指すようにしている。
-      将来的にgateway経由に統一する場合は、この2つのhrefを "/life/" "/career/"
-      に戻し、docker-compose.yml側でARCHLIFE_FRONTEND_DIST等を設定すること。
+      /life /career へのリンクは、実行時にJSで動的に決める(setNavLinks()参照)。
+      理由: このHTMLはDocker Compose版(archlife_frontend/interview_frontendが
+      別コンテナ・別ポートで動く)とexe版(gatewayが/life・/careerで直接配信する)
+      の両方で共用しているため、サーバー側の起動モードに応じて切り替える必要がある。
     -->
-    <a href="http://localhost:8081/">ライフサポートOS <span class="arrow">→</span></a>
-    <a href="http://localhost:3001/">就活支援 <span class="arrow">→</span></a>
+    <a id="nav-life" href="http://localhost:8081/">ライフサポートOS <span class="arrow">→</span></a>
+    <a id="nav-career" href="http://localhost:3001/">就活支援 <span class="arrow">→</span></a>
     <a href="http://localhost:8100/">学習支援 <span class="arrow">→</span></a>
     <a href="http://localhost:8200/">健康管理 <span class="arrow">→</span></a>
     <a href="/docs" class="ghost-link"><span style="font-family:var(--mono);font-size:12px">/docs（API）</span> <span class="arrow">→</span></a>
@@ -702,7 +699,23 @@ async function startApp() {
   loadRules();
 }
 
+/* ── ナビゲーションリンクの動的切り替え(Docker版/exe版) ────── */
+async function setNavLinks() {
+  try {
+    const r = await fetch("/core/frontend_mounts");
+    const { life, career } = await r.json();
+    if (life) document.getElementById("nav-life").href = "/life/";
+    if (career) document.getElementById("nav-career").href = "/career/";
+    // life/careerがfalseの場合(Docker Compose版)は、HTMLの初期値
+    // (localhost:8081 / localhost:3001)のままにする。
+  } catch (e) {
+    // 取得できなくても、HTMLの初期値(Docker版のポート)にフォールバックされるだけ。
+  }
+}
+
 async function boot() {
+  setNavLinks();  // 認証不要のエンドポイントなので、ログイン確認より先に呼んでよい
+
   // launch_gateway.py(単体exe版ランチャー)は、初回自動生成したトークンを
   // ユーザーに入力させる代わりに `?token=...` を付けてブラウザを開く。
   // ここでそれを拾って自動ログインし、アドレスバーからは即座に消す
