@@ -364,6 +364,11 @@ def main() -> None:
                "AI機能が使えない可能性があります。", "WARNING")
 
     manager = ProcessManager()
+    # ×ボタンでウィンドウを閉じた場合、Ctrl+Cと違ってPythonのfinally節が
+    # 実行される保証が無い(launcher_kit.install_console_close_handlerの
+    # コメント参照)。実際に子プロセスが残り続ける現象が起きたため、
+    # 明示的にハンドラーを登録しておく。
+    lk.install_console_close_handler(lambda: manager.terminate_all(timeout=3.0))
     base_env = dict(os.environ)
     frozen = is_frozen()
     # exe化後は sys.executable がインストール先の LifeSupportOS.exe を指すため、
