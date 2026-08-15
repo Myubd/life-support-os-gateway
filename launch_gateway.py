@@ -5,7 +5,7 @@ Life Support OS の統合ランチャー(方式A: gateway中心の統合配布)�
 
 interview_app単体配布(launch_fastapi.py)と違い、こちらは
 「gateway + archlife-fastapi + interview_app backend + study-support +
-health-support」の5プロセスをまとめて起動し、ブラウザは
+health-support + digital-vault」の6プロセスをまとめて起動し、ブラウザは
 http://localhost:3000 (gateway) だけを開く。個々のバックエンドは
 GATEWAY_AUTH_TOKENの検証(service_auth.py)が有効なままなので、
 統合コンソールを経由しないアクセスは引き続き401になる。
@@ -78,9 +78,10 @@ class ServiceSpec:
 #       ├── archlife_backend\launch_fastapi.exe
 #       ├── interview_backend\interview_backend.exe
 #       ├── study_support\study_support.exe
-#       └── health_support\health_support.exe
+#       ├── health_support\health_support.exe
+#       └── digital_vault\digital_vault.exe
 #
-# 5プロセス中、gateway以外の4つ。gateway自身は別扱い(フロントエンド配信の
+# 6プロセス中、gateway以外の5つ。gateway自身は別扱い(フロントエンド配信の
 # env varsも必要なため main() 内で個別に組み立てる)。
 BACKEND_SERVICES: list[ServiceSpec] = [
     ServiceSpec(
@@ -113,6 +114,13 @@ BACKEND_SERVICES: list[ServiceSpec] = [
         dev_relative_dir="../health-support",
         extra_env={"HEALTH_DB_PATH": "health.db"},
         frozen_exe_relative_path="backends/health_support/health_support.exe",
+    ),
+    ServiceSpec(
+        name="digital_vault",
+        port=8300,
+        dev_relative_dir="../digital-vault",
+        extra_env={"VAULT_DB_PATH": "digital_vault.db"},
+        frozen_exe_relative_path="backends/digital_vault/digital_vault.exe",
     ),
 ]
 

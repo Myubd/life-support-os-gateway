@@ -15,7 +15,8 @@ life-support-os-gateway / main.py
   3. 既存の2つのアプリ(archlife-fastapi, interview_appのFastAPIバックエンド)を
      それぞれ別プロセス・別ポートのまま起動しておき、gatewayが
      /api/life/* → archlife-fastapi、/api/career/* → interview_app backend、
-     /api/study/* → study-support backend に単純にリバースプロキシする。
+     /api/study/* → study-support backend、/api/health/* → health-support
+     backend、/api/vault/* → digital-vault backend に単純にリバースプロキシする。
      これにより、フロントエンドは常にgatewayの1つのオリジンだけを見ればよくなる
      (CORS設定の一本化・将来のドメイン統一・単一の起動導線という
      「一つのOS」感を実現する)。
@@ -74,6 +75,7 @@ ARCHLIFE_BACKEND_URL = os.environ.get("ARCHLIFE_BACKEND_URL", "http://localhost:
 INTERVIEW_APP_BACKEND_URL = os.environ.get("INTERVIEW_APP_BACKEND_URL", "http://localhost:8000")
 STUDY_SUPPORT_BACKEND_URL = os.environ.get("STUDY_SUPPORT_BACKEND_URL", "http://localhost:8100")
 HEALTH_SUPPORT_BACKEND_URL = os.environ.get("HEALTH_SUPPORT_BACKEND_URL", "http://localhost:8200")
+DIGITAL_VAULT_BACKEND_URL = os.environ.get("DIGITAL_VAULT_BACKEND_URL", "http://localhost:8300")
 
 # オートメーション定期実行の間隔(秒)。既定は1時間。
 # 開発時に短い間隔で確認したい場合は環境変数で上書きする。
@@ -346,6 +348,19 @@ async def proxy_health_support(request: Request, full_path: str):
     必須ではないが、他アプリと同じ「/api/<app>/*」の形に揃えておく。
     """
     return await _proxy(request, HEALTH_SUPPORT_BACKEND_URL, "/api/health")
+
+
+@app.api_route("/api/vault/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_digital_vault(request: Request, full_path: str):
+    """デジタル金庫(digital-vault)本体へのプロキシ。health-supportと同じく
+    自分のポート(8300)で独立フロントエンドを直接配信しているため必須では
+    ないが、他アプリと同じ「/api/<app>/*」の形に揃えておく。
+
+    暗号化・復号はすべてクライアント側(ブラウザ)で行われるため、gatewayは
+    他アプリと全く同じ単純なリバースプロキシとして中身(ciphertext/iv)を
+    素通りさせるだけでよい。gateway自身が復号することはない。
+    """
+    return await _proxy(request, DIGITAL_VAULT_BACKEND_URL, "/api/vault")
 
 
 # ---------------------------------------------------------------------------
