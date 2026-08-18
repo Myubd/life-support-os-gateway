@@ -73,6 +73,26 @@
   nav.apps a:hover{ background: var(--ink); color: var(--paper); }
   nav.apps a .arrow{ font-family: var(--mono); font-size:13px; }
 
+  /* ── 防災・災害情報バナー(アクティブな警報がある時だけ表示) ─── */
+  #disaster-banner{
+    border: 1.5px solid var(--seal); background: var(--seal-soft);
+    border-radius: 2px; padding: 12px 16px; margin-bottom: 32px;
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    flex-wrap: wrap;
+  }
+  #disaster-banner .banner-text{
+    font-family: var(--body); font-size: 14px; color: var(--ink); font-weight: 600;
+  }
+  #disaster-banner .banner-detail{
+    font-family: var(--mono); font-size: 12px; color: var(--ink-soft); font-weight: 400;
+  }
+  #disaster-banner a.banner-link{
+    font-family: var(--mono); font-size: 12px; color: var(--seal);
+    border: 1px solid var(--seal); border-radius: 2px; padding: 6px 12px;
+    text-decoration: none; white-space: nowrap;
+  }
+  #disaster-banner a.banner-link:hover{ background: var(--seal); color: var(--paper); }
+
   section{ margin-bottom: 48px; }
   section > h2{
     font-family: var(--display); font-weight:600; font-size: 20px;
@@ -237,6 +257,8 @@
     <a href="/docs" class="ghost-link"><span style="font-family:var(--mono);font-size:12px">/docs（API）</span> <span class="arrow">→</span></a>
   </nav>
 
+  <div id="disaster-banner" style="display:none;"></div>
+
   <section id="sec-permissions">
     <h2><span class="eyebrow">01 — 台帳</span> 権限</h2>
     <p class="lede">
@@ -353,12 +375,50 @@ async function loadProfile() {
   } catch (e) { /* 静かに無視。プロフィールは補助表示のため */ }
 }
 
+/* ── 防災・災害情報バナー ───────────────────────────────────
+   disaster-supportが取得したアクティブな警報・地震・津波情報を
+   統合コンソールの目立つ位置(ナビのすぐ下)に表示する。
+   disaster-support自体が未設定/未起動でも、他の機能が壊れないよう
+   fetch失敗時は静かにバナーを非表示のままにする(api()は使わず、
+   401でログイン画面に戻される事故も避ける)。
+*/
+const DISASTER_TYPE_LABELS = { warning: "警報・注意報", quake: "地震", tsunami: "津波" };
+
+async function loadDisasterBanner() {
+  const banner = document.getElementById("disaster-banner");
+  try {
+    const res = await fetch("/api/disaster/alerts?status=active");
+    if (!res.ok) { banner.style.display = "none"; return; }
+    const alerts = await res.json();
+    if (!Array.isArray(alerts) || alerts.length === 0) { banner.style.display = "none"; return; }
+
+    const summary = alerts
+      .map(a => `${DISASTER_TYPE_LABELS[a.alert_type] || a.alert_type}: ${a.title}`)
+      .join(" / ");
+
+    banner.innerHTML = `
+      <div>
+        <div class="banner-text">⚠ 対象地域に発表中の情報が${alerts.length}件あります</div>
+        <div class="banner-detail">${summary}</div>
+      </div>
+      <a class="banner-link" href="http://localhost:8400/">防災・災害情報を開く →</a>
+    `;
+    banner.style.display = "flex";
+  } catch (e) {
+    // disaster-supportが未起動/未設定でも他の機能を止めない
+    banner.style.display = "none";
+  }
+}
+
 /* ── 01: 権限台帳 ───────────────────────────────────────── */
 // アプリキー→表示名(未知のapp_keyはそのままの文字列を使う)
 const APP_DISPLAY_NAMES = {
   archlife: "ARCHLIFE",
   interview_app: "INTERVIEW_APP",
   study_support: "STUDY_SUPPORT",
+  health_support: "HEALTH_SUPPORT",
+  digital_vault: "DIGITAL_VAULT",
+  disaster_support: "DISASTER_SUPPORT",
   life_support_os: "LIFE_SUPPORT_OS（gateway自身）",
 };
 
@@ -695,6 +755,7 @@ document.getElementById("rule-create-btn").addEventListener("click", createRule)
 async function startApp() {
   renderSourceChecks();
   loadProfile();
+  loadDisasterBanner();
   loadPermissions();
   loadDocuments();
   loadKnowledge();
